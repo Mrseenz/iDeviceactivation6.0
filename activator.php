@@ -205,9 +205,9 @@ class ActivationGenerator
         // The '@' suppresses warnings on invalid XML, which we handle manually.
         $xml = @simplexml_load_string($requestPlist);
         if ($xml === false || !isset($xml->dict)) {
-            // Fallback to static data if parsing fails.
-            error_log("Failed to parse activation request XML. Using fallback data.");
-            return $this->getStaticDeviceInfo();
+            // If parsing fails, throw an exception.
+            // The main script body will catch this and return an appropriate error.
+            throw new \RuntimeException("Failed to parse activation request XML. Input is not valid or is empty.");
         }
 
         // Extract key-value pairs from the root dictionary.
@@ -444,4 +444,65 @@ class ActivationGenerator
         }
         return $xml;
     }
+}
+
+// Main script execution starts here
+
+// Check if the request method is POST
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Read the raw POST data (expected to be the activation request plist)
+    $requestPlist = file_get_contents('php://input');
+
+    if ($requestPlist === false || empty($requestPlist)) {
+        http_response_code(400); // Bad Request
+        header('Content-Type: application/json');
+        echo json_encode(['error' => 'No POST data received.']);
+        exit;
+    }
+
+    try {
+        // Instantiate the ActivationGenerator with the received plist
+        $generator = new ActivationGenerator($requestPlist);
+
+        // Generate the activation record
+        $activationRecord = $generator->generate();
+
+        // Set the Content-Type header for XML response
+        header('Content-Type: application/xml; charset=utf-8');
+        // Echo the generated activation record
+        echo $activationRecord;
+        exit; // Ensure no further output
+
+    } catch (\RuntimeException $e) {
+        // Handle errors during activation generation
+        http_response_code(500); // Internal Server Error
+        header('Content-Type: application/json');
+        error_log("Activation Generation Error: " . $e->getMessage()); // Log the actual error
+        echo json_encode(['error' => 'Failed to generate activation record. ' . $e->getMessage()]);
+        exit;
+    } catch (\Exception $e) {
+        // Catch any other unexpected errors
+        http_response_code(500);
+        header('Content-Type: application/json');
+        error_log("Unexpected Error: " . $e->getMessage());
+        echo json_encode(['error' => 'An unexpected error occurred.']);
+        exit;
+    }
+
+} elseif ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    // Handle GET requests (optional: display a message)
+    header('Content-Type: text/html');
+    echo "<p>This script expects a POST request with iDevice activation data. For educational purposes only.</p>";
+    // For testing purposes, you might want to use static data if no POST request is made.
+    // error_log("Received GET request. To test activation generation, send a POST request with the device plist.");
+    // $staticPlist = '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>ActivationInfoXML</key><string>...</string></dict></plist>'; // Replace with actual example
+    // $generator = new ActivationGenerator($staticPlist);
+    // header('Content-Type: application/xml');
+    // echo $generator->generate();
+
+} else {
+    // Handle other request methods
+    http_response_code(405); // Method Not Allowed
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Only POST and GET requests are allowed.']);
 }
