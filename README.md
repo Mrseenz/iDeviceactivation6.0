@@ -13,7 +13,59 @@ The `activator.php` script can:
 - Dynamically generate cryptographic elements (certificates, signed tokens) needed for an activation record.
 - Return a complete activation record XML plist.
 
-## Prerequisites
+## Using the Server Manager Script (`server_manager.py`)
+
+To simplify starting and stopping the PHP activation server and managing hosts file entries, a Python 3 script `server_manager.py` is provided. Ensure `activator.php` is in the same directory as `server_manager.py`.
+
+**Prerequisites for `server_manager.py`:**
+*   Python 3 installed.
+*   PHP CLI installed and in your system's PATH.
+
+**Permissions:**
+*   **Hosts file modification & running on privileged ports (like 80):** The `server_manager.py` script will need to be run with administrator/sudo privileges.
+    *   **Windows:** Run your terminal (Command Prompt or PowerShell) "As Administrator", then run the script.
+    *   **macOS/Linux:** Use `sudo python3 server_manager.py <command>`.
+
+**Commands:**
+
+### Start the Server
+```bash
+# On macOS/Linux (use sudo for hosts modification and port 80)
+sudo python3 server_manager.py start
+
+# On Windows (run terminal as Administrator)
+python server_manager.py start
+```
+*   This command will:
+    1.  Check if PHP is installed.
+    2.  Prompt you to add `127.0.0.1 albert.apple.com` to your hosts file if it's not already present (requires admin/sudo). You can skip this with `--no-hosts`.
+    3.  Start the PHP built-in server, listening on `0.0.0.0:80` by default (serves `activator.php`). Port 80 requires admin/sudo.
+        *   You can specify a different port: `sudo python3 server_manager.py start --port 8080` (If using a non-80 port, `albert.apple.com` redirection alone won't be enough for iTunes; client would need to target `albert.apple.com:8080`).
+    4.  The script will keep running. Press `Ctrl+C` in the terminal to stop the server.
+
+### Stop the Server
+```bash
+# On macOS/Linux
+sudo python3 server_manager.py stop
+
+# On Windows (run terminal as Administrator)
+python server_manager.py stop
+```
+*   This command will:
+    1.  Stop the PHP server that was started by the `start` command (using its saved PID).
+    2.  Prompt you to remove the `127.0.0.1 albert.apple.com` entry from your hosts file if it's present (requires admin/sudo). You can skip this with `--no-hosts`.
+
+### Command Options
+*   `--port <number>`: (For `start` command) Specify a custom port for the PHP server. Default is 80.
+*   `--no-hosts`: (For `start` and `stop` commands) Skip the interactive hosts file modification steps. Useful if you manage your hosts file manually or are not targeting `albert.apple.com`.
+
+**Important Note on SSL for iTunes:**
+The `server_manager.py` script starts the PHP server over HTTP. For full compatibility with iTunes, which typically expects `https://albert.apple.com`, you would still need to manually:
+1.  Set up a reverse proxy (like Nginx or Apache) to handle HTTPS for `albert.apple.com` and forward requests to the HTTP PHP server started by the script.
+2.  Create and install a self-signed SSL certificate for `albert.apple.com` that your system trusts.
+Alternatively, use a more advanced local server setup that can directly serve PHP over HTTPS.
+
+## Manual Setup Prerequisites
 
 1.  **PHP Environment:** You need a local web server with PHP installed (e.g., XAMPP, MAMP, or using PHP's built-in server: `php -S localhost:8000`). Ensure the `openssl` PHP extension is enabled in your `php.ini`.
 2.  **Hosts File Modification:** To redirect activation requests from your iDevice/iTunes to this local server, you'll need to modify your computer's `hosts` file. Add an entry like:
