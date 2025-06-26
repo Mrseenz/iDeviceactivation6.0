@@ -553,9 +553,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if ($finalRequestPlist) {
             $generator = new ActivationGenerator($finalRequestPlist);
-            $activationRecord = $generator->generate();
-            header('Content-Type: application/xml; charset=utf-8');
-            echo $activationRecord;
+            $activationRecordPlist = $generator->generate(); // This is the XML string
+
+            // Prepare the HTML wrapper
+            $htmlOutput = <<<HTML
+<!DOCTYPE html>
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+      <meta name="keywords" content="iTunes Store" />
+      <meta name="description" content="iTunes Store" />
+      <title>iPhone Activation</title>
+      <link href="https://static.deviceservices.apple.com/deviceservices/stylesheets/common-min.css" charset="utf-8" rel="stylesheet" />
+      <link href="https://static.deviceservices.apple.com/deviceservices/stylesheets/styles.css" charset="utf-8" rel="stylesheet" />
+      <link href="https://static.deviceservices.apple.com/deviceservices/stylesheets/IPAJingleEndPointErrorPage-min.css" charset="utf-8" rel="stylesheet" />
+      <script id="protocol" type="text/x-apple-plist">{$activationRecordPlist}</script>
+      <script>
+		var protocolElement = document.getElementById("protocol");
+		var protocolContent = protocolElement.innerText;
+		iTunes.addProtocol(protocolContent);
+      </script>
+   </head>
+   <body>
+   </body>
+</html>
+HTML;
+
+            header('Content-Type: text/html; charset=utf-8');
+            echo $htmlOutput;
             exit;
         } else {
             // This condition should ideally be met if it's a multipart request
