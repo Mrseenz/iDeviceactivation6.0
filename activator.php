@@ -448,37 +448,131 @@ class ActivationGenerator
 
 // Main script execution starts here
 
-// Check if the request method is POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Read the raw POST data (expected to be the activation request plist)
-    $requestPlist = file_get_contents('php://input');
+    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+    $finalRequestPlist = null;
 
-    if ($requestPlist === false || empty($requestPlist)) {
-        http_response_code(400); // Bad Request
-        header('Content-Type: application/json');
-        echo json_encode(['error' => 'No POST data received.']);
-        exit;
+    // Debug: Log content type and raw input
+    // error_log("Content-Type: " . $contentType);
+    // error_log("Raw php://input: " . file_get_contents('php://input'));
+    // if (!empty($_POST)) {
+    //     error_log("POST data: " . print_r($_POST, true));
+    // }
+
+    if (stripos($contentType, 'multipart/form-data') !== false) {
+        // Handle multipart/form-data
+        // (Further parsing for multipart will be added in the next steps)
+        // For now, we'll just set a placeholder or error if not handled by $_POST
+        if (isset($_POST['activation-info'])) {
+            $activationInfoXmlString = $_POST['activation-info'];
+            // This string now needs to be parsed to extract the actual Base64 encoded plist
+            // (This will be step 3 of the plan)
+            // For now, we'll placeholder it or error until step 3 is implemented.
+            // $finalRequestPlist = "NEEDS_PARSING_FROM_ACTIVATION_INFO_XML";
+        } else {
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Multipart request received, but "activation-info" part is missing.']);
+            exit;
+        }
+        // The actual extraction and decoding will be handled in subsequent plan steps.
+        // For this step, we're just detecting it.
+
+    } elseif (stripos($contentType, 'application/xml') !== false || stripos($contentType, 'text/xml') !== false) {
+        // Handle raw XML POST
+        $finalRequestPlist = file_get_contents('php://input');
+        if ($finalRequestPlist === false || empty($finalRequestPlist)) {
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'No raw XML POST data received.']);
+            exit;
+        }
+    } else {
+        // Fallback: Try to read raw input directly if content type is unknown or not explicitly handled
+        // This maintains previous behavior for unspecified content types that might carry raw XML.
+        $finalRequestPlist = file_get_contents('php://input');
+        if ($finalRequestPlist === false || empty($finalRequestPlist)) {
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Unsupported Content-Type or no data received. Script expects multipart/form-data or application/xml.']);
+            exit;
+        }
+        // error_log("Warning: Received POST with Content-Type '$contentType'. Attempting to process as raw XML.");
     }
 
+    // Processing $finalRequestPlist will be done in subsequent steps if it's from multipart.
+    // If it's raw XML, it's ready.
+    // $finalRequestPlist will store the actual plist string for ActivationGenerator
+    // $activationInfoXmlString is temporary for multipart data before base64 extraction
+
+    // $finalRequestPlist will store the actual plist string for ActivationGenerator
+    // $activationInfoXmlString is temporary for multipart data before base64 extraction
+
+    if (isset($activationInfoXmlString)) { // This means it was multipart and activation-info was found
+        // Step 3: Parse the XML content of the activation-info part
+        //         to find the <key>ActivationInfoXML</key> and its subsequent <data> tag.
+        // Step 4: Base64-decode the content of that <data> tag.
+        try {
+            $xml = @simplexml_load_string($activationInfoXmlString);
+            if ($xml === false) {
+                throw new \RuntimeException('Failed to parse XML from activation-info part.');
+            }
+
+            // Find ActivationInfoXML key and its following data value
+            $activationInfoXMLBase64 = null;
+            for ($i = 0; $i < count($xml->dict->key); $i++) {
+                if ((string)$xml->dict->key[$i] === 'ActivationInfoXML') {
+                    if (isset($xml->dict->data[$i])) { // Check if the next element is <data>
+                        $activationInfoXMLBase64 = (string)$xml->dict->data[$i];
+                        break;
+                    }
+                }
+            }
+
+            if ($activationInfoXMLBase64 === null) {
+                throw new \RuntimeException('Could not find ActivationInfoXML <data> tag in activation-info part.');
+            }
+
+            // Step 4: Decode the Base64 string
+            $decodedPlist = base64_decode($activationInfoXMLBase64, true);
+            if ($decodedPlist === false || empty($decodedPlist)) {
+                throw new \RuntimeException('Failed to Base64-decode the ActivationInfoXML content or content is empty.');
+            }
+            $finalRequestPlist = $decodedPlist;
+
+        } catch (\RuntimeException $e) {
+            http_response_code(400); // Bad Request due to malformed multipart content
+            header('Content-Type: application/json');
+            error_log("Error processing activation-info: " . $e->getMessage());
+            echo json_encode(['error' => 'Error processing activation-info part: ' . $e->getMessage()]);
+            exit;
+        }
+    }
+    // If $finalRequestPlist is populated (either from raw XML or after multipart processing) then proceed.
+
     try {
-        // Instantiate the ActivationGenerator with the received plist
-        $generator = new ActivationGenerator($requestPlist);
-
-        // Generate the activation record
-        $activationRecord = $generator->generate();
-
-        // Set the Content-Type header for XML response
-        header('Content-Type: application/xml; charset=utf-8');
-        // Echo the generated activation record
-        echo $activationRecord;
-        exit; // Ensure no further output
-
-    } catch (\RuntimeException $e) {
-        // Handle errors during activation generation
+        if ($finalRequestPlist) {
+            $generator = new ActivationGenerator($finalRequestPlist);
+            $activationRecord = $generator->generate();
+            header('Content-Type: application/xml; charset=utf-8');
+            echo $activationRecord;
+            exit;
+        } else {
+            // This condition should ideally be met if it's a multipart request
+            // and $activationInfoXmlString was not set (already handled),
+            // or if it's not multipart and not raw XML (already handled).
+            // If it's multipart and parsing activation-info failed, it would have exited in the catch block above.
+            // This is a fallback for an unexpected state.
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'No valid activation request data could be processed.']);
+            exit;
+        }
+    } catch (\RuntimeException $e) { // Errors from ActivationGenerator itself
         http_response_code(500); // Internal Server Error
         header('Content-Type: application/json');
-        error_log("Activation Generation Error: " . $e->getMessage()); // Log the actual error
-        echo json_encode(['error' => 'Failed to generate activation record. ' . $e->getMessage()]);
+        error_log("Activation Generation Error: " . $e->getMessage() . " (Input type: " . (isset($activationInfoXmlString) ? "multipart/form-data" : "raw") . ")");
+        echo json_encode(['error' => 'Failed to generate activation record. Detail: ' . $e->getMessage()]);
         exit;
     } catch (\Exception $e) {
         // Catch any other unexpected errors
