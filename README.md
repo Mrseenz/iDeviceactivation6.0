@@ -128,4 +128,70 @@ This method is useful if you have already captured the final, decoded activation
 *   **Firewall:** Check that your OS or network firewall isn't blocking connections to your server.
 *   **HTTPS/SSL Issues (for iTunes):** This is the most common and complex issue. Ensure your certificate is valid for `albert.apple.com`, trusted by your system, and your web server is correctly configured for SSL for that domain. Tools like Wireshark can help inspect TLS handshake failures.
 *   **Hosts File:** Double-check for typos. Flush your DNS cache after changes (`ipconfig /flushdns` on Windows, or restart networking services/reboot on macOS/Linux).
+
+## `activator2.0.php`: Activation Simulation with Simulated Lock Status
+
+`activator2.0.php` extends the functionality of `activator.php` by introducing a local SQLite database (`activation_simulator.sqlite`) to store device information and a **simulated** activation lock status. This is for **educational purposes only** to demonstrate how a server might handle different device states. **It does not interact with or affect real Apple Activation Lock.**
+
+### Key Features of `activator2.0.php`:
+
+*   **Local Database:** Uses SQLite to keep track of devices that have attempted activation.
+*   **Simulated Lock:** Each device in the database has an `is_simulated_locked` flag (0 for unlocked, 1 for locked).
+*   **Conditional Response:**
+    *   If a device is marked as "simulated locked" in the local database, `activator2.0.php` will return a basic HTML page indicating it's locked (with a custom message if set).
+    *   If a device is "simulated unlocked" (or new to the database, defaulting to unlocked), it will generate and return a full activation record, wrapped in the iTunes-style HTML response.
+*   **Device Registration:** When a device attempts activation for the first time, its details (UDID, Serial, IMEI, Product Type) are saved to the database.
+*   **Reuses Activation Logic:** Utilizes the same core `ActivationGenerator` class to create activation records for "unlocked" devices.
+
+### Database Schema (`activation_simulator.sqlite` - table `devices`)
+
+*   `id`: INTEGER, Primary Key, Auto-increment
+*   `udid`: TEXT, Unique, Not Null (Primary device identifier)
+*   `serial_number`: TEXT, Unique (Secondary identifier)
+*   `imei`: TEXT
+*   `product_type`: TEXT
+*   `is_simulated_locked`: INTEGER, Not Null, Default 0 (0 = unlocked, 1 = locked)
+*   `simulated_lock_message`: TEXT (Custom message for simulated lock screen)
+*   `activation_record_xml`: TEXT (Stores the last generated activation record for an unlocked device)
+*   `notes`: TEXT
+*   `first_seen_timestamp`: DATETIME, Default CURRENT_TIMESTAMP
+*   `last_activation_attempt_timestamp`: DATETIME, Default CURRENT_TIMESTAMP
+
+### `manage_lock.php`: Managing Simulated Lock Status
+
+A companion script, `manage_lock.php`, provides a web interface to:
+*   View all devices registered in the `activation_simulator.sqlite` database.
+*   Search for specific devices by UDID or Serial Number.
+*   Manually set a device's `is_simulated_locked` status to `1` (locked) or `0` (unlocked).
+*   Set a custom `simulated_lock_message` when locking a device.
+*   Delete device records from the simulation.
+
+**How to use `activator2.0.php` and `manage_lock.php`:**
+
+1.  **Setup:**
+    *   Ensure `activator2.0.php`, `manage_lock.php` are in your PHP server's document root. The `ActivationGenerator` class is included within `activator2.0.php`.
+    *   The PHP server must have write permissions in its directory to create and manage `activation_simulator.sqlite`.
+    *   Use `server_manager.py` (recommended) or manual setup to run the PHP server, pointing `albert.apple.com` to it.
+        *   When using `server_manager.py`: By default, it looks for `activator.php`. To use `activator2.0.php` as the primary activation endpoint for `server_manager.py`, you should rename `activator2.0.php` to `activator.php` in your filesystem, or modify `server_manager.py` to target `activator2.0.php`.
+        *   Access `manage_lock.php` by browsing to `http://localhost/manage_lock.php` (or `http://albert.apple.com/manage_lock.php` if your server is set up that way and `manage_lock.php` is in the docroot for `albert.apple.com`).
+
+2.  **First Activation Attempt:**
+    *   When an iDevice (via iTunes or other tools) sends an activation request to your server (which should be running `activator2.0.php`, possibly renamed to `activator.php`), the script will:
+        *   Parse the device details.
+        *   Add the device to the `activation_simulator.sqlite` database with `is_simulated_locked = 0` (unlocked).
+        *   Generate a full activation record and return it in the iTunes HTML format.
+        *   You can then view this device in `manage_lock.php`.
+
+3.  **Simulating a Locked Device:**
+    *   Open `manage_lock.php` in your web browser.
+    *   Find the device you want to simulate as locked.
+    *   Use the form or row action to set its status to "LOCKED". You can add a custom message like "This iPhone is locked to a simulated Apple ID."
+    *   Now, if the same iDevice attempts activation again via `activator2.0.php` (or `activator.php` if renamed), it will receive the HTML page indicating it's "simulated locked" with your message.
+
+4.  **Simulating an Unlocked Device:**
+    *   Use `manage_lock.php` to set the device's status back to "UNLOCKED".
+    *   The next activation attempt through `activator2.0.php` (or `activator.php` if renamed) will again generate a full activation record.
+
+**Important:**
+*   This entire system is a **local simulation**. It does not affect real Apple servers or real device lock statuses.
 ```
